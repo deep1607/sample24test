@@ -1,0 +1,28 @@
+management: 
+  endpoint: 
+    metrics: 
+      enabled: true
+    prometheus: 
+      enabled: true
+  endpoints: 
+    web: 
+      exposure: 
+        include: "*"
+  metrics: 
+    export: 
+      prometheus: 
+        enabled: true
+spring: 
+  application: 
+    name: sample24test
+  data: 
+    mongodb: 
+      uri: mongodb://${server.mongodb.uri}/demo
+  jackson: 
+    serialization: 
+      WRITE_DATES_AS_TIMESTAMPS: false
+  profiles: 
+    active: local
+  sleuth: 
+    sampler: 
+      percentage: 1

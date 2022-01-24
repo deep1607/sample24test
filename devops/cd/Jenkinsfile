@@ -1,0 +1,122 @@
+def  readconfigfile='', configserveruri='';
+def appDeployProcess;
+def props;
+def propsvault;
+def IBMCLOUD_HOME = "";
+node ('') {
+
+    stage('Pulling deployment details') {
+        
+            try {
+                checkout scm
+                props = readProperties file: """devops/deploy.properties"""
+                
+                //Overriding the properties if available in parameter for higher environments
+                props['configserveruri'] = "${configServerUrl}" ?: props['configserveruri']
+                echo "Using " + props['configserveruri'] + " Config server url."
+                props['deploy.defaultEnvironment'] = "${profile}" ?: props['deploy.defaultEnvironment']
+                echo "Using \"" + props['deploy.defaultEnvironment'] + "\" profile."
+                props['api.version'] = "${version}" ?: props['api.version']
+                echo "Using \"" + props['api.version'] + "\" docker version."
+
+                
+            }
+            catch (e) {
+                currentBuild.result = 'FAILURE'
+                sh """rm -rf  credential.properties vault.json"""
+                echo """${e.getMessage()}"""
+                throw e
+            }
+            catch (error) {
+                currentBuild.result = 'FAILURE'
+                sh """rm -rf  credential.properties vault.json"""
+                echo """${error.getMessage()}"""
+                throw error
+            }
+       
+    }
+
+
+     stage('Deploy to Openshift ansible') {
+        try {
+            println "Deployment tool selected is  -> " + 'ANSIBLE'
+            println " Node name " + """${NODE_NAME}"""
+            println " Node name " + """${BUILD_TAG}"""
+			withFolderProperties {
+                    IC_REG_URL = """${env.dockerRegistryUrl}"""
+                    IC_REG_NAME = """${env.dockerRegistry}"""
+                    IMAGE_NAME = """${env.dockerRegistryUrl}/${env.dockerRegistry}/${props['deploy.app']}"""
+				withCredentials([string(credentialsId: 'cr-token', variable: 'CLOUD_TOKEN'),
+							    string(credentialsId:'openshift-server', variable: 'OPENSHIFT_SERVER'),
+							    string(credentialsId:'gm4c-oc-token', variable: 'OPENSHIFT_TOKEN'),
+							    string(credentialsId:'openshift-project-name', variable:'OPENSHIFT_PROJECT_NAME')]) {
+
+                def tempFolderName = """${BUILD_TAG}"""
+                println " tempFolderName " + """${tempFolderName}"""
+				
+                    sh """
+                        echo --- > external_vars.yml
+  
+                        echo API_NAME: ${props['deploy.app']} >> external_vars.yml
+                        echo IMAGE_TAG: ${props['api.version']} >> external_vars.yml
+                        echo IMAGE_NAME: ${IMAGE_NAME} >> external_vars.yml
+                        echo CLOUD_TOKEN: ${CLOUD_TOKEN} >> external_vars.yml
+                        echo PORT_TO_DEPLOY_CONTAINER: ${props['app.port']} >> external_vars.yml
+                        echo FOLDER_NAME: ${tempFolderName} >> external_vars.yml
+                        echo RUNID: ${props['run.id']} >> external_vars.yml
+                        echo IMPLEMENTATION_TYPE: ${props['api.implementation.type']} >> external_vars.yml
+                        echo PORT_TO_DEPLOY_CONTAINER_MICRO: ${props['app.httpsport']} >> external_vars.yml
+                        echo OPENSHIFT_SERVER: ${OPENSHIFT_SERVER} >> external_vars.yml
+                        echo OPENSHIFT_TOKEN: ${OPENSHIFT_TOKEN} >> external_vars.yml
+                        echo IC_REG_URL: ${IC_REG_URL} >> external_vars.yml
+                        echo IC_REG_NAME: ${IC_REG_NAME} >> external_vars.yml
+                        echo PROJECT_NAME: ${OPENSHIFT_PROJECT_NAME} >> external_vars.yml
+                    """
+						
+						sh """
+                            echo DYNAMIC_PORT_UPDATEA_URL: ${props['runManagementIP']} >> external_vars.yml
+                            mkdir -p /home/docker-node/ansibleDir/${tempFolderName}
+                            cp devops/cd/openshift-playbook-template.yml /home/docker-node/ansibleDir/${tempFolderName}/playbook.yml
+                            cp devops/cd/inventory.py /home/docker-node/ansibleDir/${tempFolderName}/inventory.py 
+                            cp external_vars.yml /home/docker-node/ansibleDir/${tempFolderName}/external_vars.yml
+                            cp devops/cd/deploymentConfigTemplate.yaml /home/docker-node/ansibleDir/${tempFolderName}/deploymentConfigTemplate.yaml 
+                            cp devops/cd/imageStreamTemplate.yaml /home/docker-node/ansibleDir/${tempFolderName}/imageStreamTemplate.yaml 
+                            cp devops/cd/routeTemplate.yaml /home/docker-node/ansibleDir/${tempFolderName}/routeTemplate.yaml 
+                            cp devops/cd/servicesTemplate.yaml /home/docker-node/ansibleDir/${tempFolderName}/servicesTemplate.yaml 
+                            chmod 0777 /home/docker-node/ansibleDir/${tempFolderName}/inventory.py 
+                            ansible-playbook -i /home/docker-node/ansibleDir/${tempFolderName}/inventory.py /home/docker-node/ansibleDir/${tempFolderName}/playbook.yml 
+                    """	
+                }
+            }
+        }
+         catch (e) {
+            currentBuild.result = 'FAILURE'
+            throw e
+        }  
+    } 
+
+
+    stage('Validate Microservice Deployment') {
+        try {
+            if ("""${stageExecution}""".trim().toUpperCase() != "BUILD") {
+                echo "Checking Microservices status"
+                //Add your helth check here
+            }
+        }
+        catch (e) {
+            currentBuild.result = 'FAILURE'
+            echo """${e.getMessage()}"""
+            sh """rm -rf  credential.properties vault.json"""
+            throw e
+        }
+        catch (error) {
+            currentBuild.result = 'UNSTABLE'
+            echo """${error.getMessage()}"""
+            sh """rm -rf  credential.properties vault.json"""
+        }
+    }
+
+
+
+
+}
